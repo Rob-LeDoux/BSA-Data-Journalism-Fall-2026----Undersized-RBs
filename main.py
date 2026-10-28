@@ -15,16 +15,30 @@ SEASONS = list(range(2000, 2026))
 WP_MIN = 0.10
 WP_MAX = 0.90
 
+# Undersized: 5'9" or shorter AND under 205 lbs
+UNDERSIZED_MAX_HEIGHT = 69  # inches, inclusive
+UNDERSIZED_MAX_WEIGHT = 205  # lbs, exclusive
+
 ROSTER_COLS =["season", "gsis_id", "full_name", "height", "weight", "birth_date", "entry_year", "draft_number"]
 
 
 def load_rb_roster(seasons):
     rosters = nfl.load_rosters(seasons)
     # Players who changed teams mid-season appear once per team
-    return (
+    rbs = (
         rosters.filter(pl.col("position") == "RB")
         .select(ROSTER_COLS)
         .unique(["season", "gsis_id"], keep="first", maintain_order=True)
+    )
+    # One height/weight per player (median across his seasons) so listings that
+    # shift year to year can't move him between groups; also fills missing years
+    sizes = rbs.group_by("gsis_id").agg(
+        player_height=pl.col("height").median(),
+        player_weight=pl.col("weight").median(),
+    )
+    is_undersized = (pl.col("player_height") <= UNDERSIZED_MAX_HEIGHT) & (pl.col("player_weight") < UNDERSIZED_MAX_WEIGHT)
+    return rbs.join(sizes, on="gsis_id", how="left").with_columns(
+        size_group=pl.when(is_undersized).then(pl.lit("undersized")).otherwise(pl.lit("other"))
     )
 
 
