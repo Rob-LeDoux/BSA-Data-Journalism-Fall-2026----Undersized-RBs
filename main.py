@@ -9,7 +9,13 @@ update_config(cache_mode="filesystem")
 
 SEASONS = list(range(2000, 2026))
 
-ROSTER_COLS = ["season", "gsis_id", "full_name", "height", "weight", "birth_date", "entry_year", "draft_number"]
+# Garbage time: the offense's pre-snap win probability is outside 10%-90%, the
+# standard nflfastR / rbsdm.com cutoff. Uses `wp` rather than `vegas_wp` so that
+# pregame spreads don't mark early plays by big underdogs as "decided".
+WP_MIN = 0.10
+WP_MAX = 0.90
+
+ROSTER_COLS =["season", "gsis_id", "full_name", "height", "weight", "birth_date", "entry_year", "draft_number"]
 
 
 def load_rb_roster(seasons):
@@ -32,6 +38,7 @@ def load_season_rb_touches(season, rbs):
         .with_columns(
             touch_type=pl.when(is_rush).then(pl.lit("rush")).otherwise(pl.lit("target")),
             player_id=pl.when(is_rush).then(pl.col("rusher_player_id")).otherwise(pl.col("receiver_player_id")),
+            garbage_time=(pl.col("wp") < WP_MIN) | (pl.col("wp") > WP_MAX),
         )
         .join(rbs, left_on=["season", "player_id"], right_on=["season", "gsis_id"], how="inner")
     )
@@ -49,9 +56,15 @@ def load_rb_touches(seasons):
     return pl.concat(frames, how="diagonal_relaxed").to_pandas(use_pyarrow_extension_array=True)
 
 
+def remove_garbage_time(df):
+    return df[~df["garbage_time"]]
+
+
 def main():
-    rb = load_rb_touches(SEASONS)
-    print(f"Loaded {len(rb):,} RB plays for seasons {SEASONS[0]}-{SEASONS[-1]}")
+    all_rb = load_rb_touches(SEASONS)
+    rb = remove_garbage_time(all_rb)
+    print(f"Loaded {len(all_rb):,} RB plays for seasons {SEASONS[0]}-{SEASONS[-1]}")
+    print(f"Removed {len(all_rb) - len(rb):,} garbage-time plays, {len(rb):,} remain")
     print(rb["touch_type"].value_counts())
     print(f"Receptions: {int(rb['complete_pass'].sum()):,}")
     print(rb[["season", "posteam", "full_name", "touch_type", "height", "weight", "yards_gained"]].head())
