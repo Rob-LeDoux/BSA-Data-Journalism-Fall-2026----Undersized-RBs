@@ -1,5 +1,9 @@
+from pathlib import Path
+
+import numpy as np
 import pandas as pd
 import polars as pl
+import matplotlib.pyplot as plt
 import nflreadpy as nfl
 from nflreadpy.config import update_config
 
@@ -21,6 +25,15 @@ UNDERSIZED_MAX_WEIGHT = 205  # lbs, exclusive
 
 # Participation data (defenders_in_box) only exists from 2016 on
 FIRST_PARTICIPATION_SEASON = 2016
+
+FIGURES_DIR = Path(__file__).parent / "figures"
+
+# Chart colors (series 1 = blue, series 2 = orange) and ink
+GROUP_COLORS = {"undersized": "#2a78d6", "other": "#eb6834"}
+TEXT = "#0b0b0b"
+MUTED = "#898781"
+GRID = "#e1e0d9"
+SURFACE = "#fcfcfb"
 
 ROSTER_COLS = ["season", "gsis_id", "full_name", "height", "weight", "birth_date", "entry_year", "draft_number"]
 
@@ -89,6 +102,50 @@ def remove_garbage_time(df):
     return df[~df["garbage_time"]]
 
 
+def plot_rush_yards_boxplot(rb):
+    rushes = rb[rb["touch_type"] == "rush"]
+    groups = ["undersized", "other"]
+    # Two-point attempts have no rushing_yards, so drop missing values
+    data = [rushes.loc[rushes["size_group"] == g, "rushing_yards"].dropna().to_numpy(dtype=float) for g in groups]
+
+    fig, ax = plt.subplots(figsize=(7, 6), facecolor=SURFACE)
+    ax.set_facecolor(SURFACE)
+    # Whiskers reach 1.5x the box height; the thousands of long runs beyond them
+    # are hidden because they would bury the boxes
+    box = ax.boxplot(
+        data,
+        tick_labels=[f"Undersized\n(n={len(data[0]):,})", f"Other RBs\n(n={len(data[1]):,})"],
+        widths=0.5,
+        patch_artist=True,
+        showfliers=False,
+        medianprops={"color": TEXT, "linewidth": 2},
+        whiskerprops={"color": MUTED},
+        capprops={"color": MUTED},
+    )
+    for patch, group in zip(box["boxes"], groups):
+        patch.set_facecolor(GROUP_COLORS[group])
+        patch.set_edgecolor(GROUP_COLORS[group])
+
+    # Label each box's median, mean and quartiles
+    for i, values in enumerate(data, start=1):
+        q1, median, q3 = np.percentile(values, [25, 50, 75])
+        ax.text(i + 0.3, median, f"median {median:.0f}\nmean {values.mean():.2f}", va="center", color=TEXT, fontsize=9)
+        ax.text(i + 0.3, q3, f"Q3 {q3:.0f}", va="center", color=MUTED, fontsize=9)
+        ax.text(i + 0.3, q1, f"Q1 {q1:.0f}", va="center", color=MUTED, fontsize=9)
+
+    ax.set_xlim(0.5, 2.9)
+    ax.set_ylabel("Rushing yards per carry", color=MUTED)
+    ax.set_title("Rushing yards per carry by RB size, 2000-2025\n(garbage time removed, outliers hidden)", color=TEXT, loc="left", fontsize=12)
+    ax.grid(axis="y", color=GRID, linewidth=0.8)
+    ax.set_axisbelow(True)
+    for side in ("top", "right", "left"):
+        ax.spines[side].set_visible(False)
+    ax.spines["bottom"].set_color("#c3c2b7")
+    ax.tick_params(colors=MUTED, length=0)
+    fig.tight_layout()
+    return fig
+
+
 def main():
     rbs = load_rb_roster(SEASONS)
     all_rb = load_rb_touches(SEASONS, rbs)
@@ -99,6 +156,13 @@ def main():
     print(f"Receptions: {int(rb['complete_pass'].sum()):,}")
     print(rb["size_group"].value_counts())
     print(rb[["season", "posteam", "full_name", "touch_type", "size_group", "age", "yards_gained"]].head())
+
+    fig = plot_rush_yards_boxplot(rb)
+    FIGURES_DIR.mkdir(exist_ok=True)
+    path = FIGURES_DIR / "rush_yards_boxplot.png"
+    fig.savefig(path, dpi=150)
+    print(f"Saved {path}")
+    plt.show()
 
 
 if __name__ == "__main__":
