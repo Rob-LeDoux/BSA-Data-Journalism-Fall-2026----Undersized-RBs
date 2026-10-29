@@ -19,7 +19,10 @@ WP_MAX = 0.90
 UNDERSIZED_MAX_HEIGHT = 69  # inches, inclusive
 UNDERSIZED_MAX_WEIGHT = 205  # lbs, exclusive
 
-ROSTER_COLS =["season", "gsis_id", "full_name", "height", "weight", "birth_date", "entry_year", "draft_number"]
+# Participation data (defenders_in_box) only exists from 2016 on
+FIRST_PARTICIPATION_SEASON = 2016
+
+ROSTER_COLS = ["season", "gsis_id", "full_name", "height", "weight", "birth_date", "entry_year", "draft_number"]
 
 
 def load_rb_roster(seasons):
@@ -29,6 +32,8 @@ def load_rb_roster(seasons):
         rosters.filter(pl.col("position") == "RB")
         .select(ROSTER_COLS)
         .unique(["season", "gsis_id"], keep="first", maintain_order=True)
+        # Birth date is missing in some seasons; fill from the player's other seasons
+        .with_columns(birth_date=pl.col("birth_date").max().over("gsis_id"))
     )
     # One height/weight per player (median across his seasons) so listings that
     # shift year to year can't move him between groups; also fills missing years
@@ -46,7 +51,7 @@ def load_season_rb_touches(season, rbs):
     # Rushes plus targeted passes (completions and incompletions) by RBs
     is_rush = pl.col("rush_attempt") == 1
     is_target = (pl.col("pass_attempt") == 1) & pl.col("receiver_player_id").is_not_null()
-    return (
+    touches = (
         nfl.load_pbp(season)
         .filter(is_rush | is_target)
         .with_columns(
@@ -55,12 +60,22 @@ def load_season_rb_touches(season, rbs):
             garbage_time=(pl.col("wp") < WP_MIN) | (pl.col("wp") > WP_MAX),
         )
         .join(rbs, left_on=["season", "player_id"], right_on=["season", "gsis_id"], how="inner")
+        .with_columns(
+            age=((pl.col("game_date").str.to_date() - pl.col("birth_date")).dt.total_days() / 365.25).round(2)
+        )
     )
+    if season >= FIRST_PARTICIPATION_SEASON:
+        box = nfl.load_participation(season).select(
+            game_id=pl.col("nflverse_game_id"),
+            play_id=pl.col("play_id").cast(touches.schema["play_id"]),
+            defenders_in_box=pl.col("defenders_in_box"),
+        )
+        touches = touches.join(box, on=["game_id", "play_id"], how="left")
+    return touches
 
 
-def load_rb_touches(seasons):
+def load_rb_touches(seasons, rbs):
     # One season at a time so the full ~1.2M-play pbp is never in memory at once
-    rbs = load_rb_roster(seasons)
     frames = []
     for season in seasons:
         print(f"Loading {season}...")
@@ -75,13 +90,15 @@ def remove_garbage_time(df):
 
 
 def main():
-    all_rb = load_rb_touches(SEASONS)
+    rbs = load_rb_roster(SEASONS)
+    all_rb = load_rb_touches(SEASONS, rbs)
     rb = remove_garbage_time(all_rb)
     print(f"Loaded {len(all_rb):,} RB plays for seasons {SEASONS[0]}-{SEASONS[-1]}")
     print(f"Removed {len(all_rb) - len(rb):,} garbage-time plays, {len(rb):,} remain")
     print(rb["touch_type"].value_counts())
     print(f"Receptions: {int(rb['complete_pass'].sum()):,}")
-    print(rb[["season", "posteam", "full_name", "touch_type", "height", "weight", "yards_gained"]].head())
+    print(rb["size_group"].value_counts())
+    print(rb[["season", "posteam", "full_name", "touch_type", "size_group", "age", "yards_gained"]].head())
 
 
 if __name__ == "__main__":

@@ -1,0 +1,9 @@
+# Exported datasets are too big for GitHub
+*.csv
+*.parquet
+output/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
