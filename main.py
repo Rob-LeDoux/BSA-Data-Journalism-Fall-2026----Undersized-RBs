@@ -22,7 +22,19 @@ UNDERSIZED_MAX_WEIGHT = 205  # lbs, exclusive
 # Participation data (defenders_in_box) only exists from 2016 on
 FIRST_PARTICIPATION_SEASON = 2016
 
-ROSTER_COLS = ["season", "gsis_id", "full_name", "height", "weight", "birth_date", "entry_year", "draft_number"]
+ROSTER_COLS = ["season", "gsis_id", "full_name", "height", "weight", "birth_date", "entry_year", "draft_number", "pfr_id"]
+
+# Combine drills: 40-yard dash (seconds), 3-cone drill (seconds), broad jump (inches)
+COMBINE_COLS = ["forty", "cone", "broad_jump"]
+
+
+def load_combine_drills():
+    combine = nfl.load_combine().filter(pl.col("pfr_id").is_not_null())
+    # A few pfr_ids are shared by two different combine attendees (e.g. a tackle
+    # and a running back); keep the RB row, and drop ids that are still ambiguous
+    is_shared = pl.col("pfr_id").is_duplicated()
+    combine = combine.filter(~is_shared | pl.col("pos").is_in(["RB", "FB"]))
+    return combine.filter(~pl.col("pfr_id").is_duplicated()).select(["pfr_id", *COMBINE_COLS])
 
 
 def load_rb_roster(seasons):
@@ -42,8 +54,21 @@ def load_rb_roster(seasons):
         player_weight=pl.col("weight").median(),
     )
     is_undersized = (pl.col("player_height") <= UNDERSIZED_MAX_HEIGHT) & (pl.col("player_weight") < UNDERSIZED_MAX_WEIGHT)
-    return rbs.join(sizes, on="gsis_id", how="left").with_columns(
-        size_group=pl.when(is_undersized).then(pl.lit("undersized")).otherwise(pl.lit("other"))
+    # Rosters only list pfr_id for about a third of RBs; the players table has it
+    # for nearly all of them, and pfr_id is what links to the combine data
+    player_pfr_ids = (
+        nfl.load_players()
+        .filter(pl.col("gsis_id").is_not_null())
+        .select(["gsis_id", pl.col("pfr_id").alias("players_pfr_id")])
+        .unique("gsis_id")
+    )
+    return (
+        rbs.join(sizes, on="gsis_id", how="left")
+        .with_columns(size_group=pl.when(is_undersized).then(pl.lit("undersized")).otherwise(pl.lit("other")))
+        .join(player_pfr_ids, on="gsis_id", how="left")
+        .with_columns(pfr_id=pl.coalesce("pfr_id", "players_pfr_id"))
+        .drop("players_pfr_id")
+        .join(load_combine_drills(), on="pfr_id", how="left")
     )
 
 
