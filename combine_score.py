@@ -158,7 +158,7 @@ def plot_share_drafted(ax, scored):
     ax.set_ylabel("Drafted (%)", color=TEXT_2)
     ax.set_xlabel("RB combine score (percentile among RB combine invitees)", color=TEXT_2)
     ax.set_title("Share drafted, by combine score", loc="left", color=TEXT, fontsize=11.5, fontweight="bold")
-    ax.legend(loc="upper left", frameon=False, labelcolor=TEXT)
+    ax.legend(loc="upper left", frameon=False, labelcolor=TEXT, fontsize=9)
 
 
 def plot_drafted_scores(ax, scored):
@@ -179,7 +179,8 @@ def plot_drafted_scores(ax, scored):
     ax.set_xlim(-0.5, len(ROUND_GROUPS) - 0.5)
     ax.set_ylim(30, 95)
     ax.set_ylabel("Average combine score of drafted backs\n(percentile; axis starts at 30)", color=TEXT_2)
-    ax.set_title("Drafted undersized backs scored higher in every round", loc="left", color=TEXT, fontsize=11.5, fontweight="bold")
+    # Two lines: the full title is wider than this narrower panel
+    ax.set_title("Drafted undersized backs scored higher\nin every round", loc="left", color=TEXT, fontsize=11.5, fontweight="bold")
 
 
 def plot_figure(scored, weights):
@@ -195,7 +196,7 @@ def plot_figure(scored, weights):
     fig.text(
         0.07, 0.895,
         "Among the most athletic backs (top 40% of scores), undersized backs were drafted less often than equally athletic backs; lower down\n"
-        "there is no gap. Drafted undersized backs out-tested other backs taken in the same rounds. "
+        "there is no consistent gap. Drafted undersized backs out-tested other backs taken in the same rounds. "
         f"Weights: 40 {pct['forty']}, broad jump {pct['broad_jump']}, 3-cone {pct['cone']}.",
         fontsize=10.5, color=TEXT_2, va="top",
     )
