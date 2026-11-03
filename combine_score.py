@@ -180,7 +180,7 @@ def plot_drafted_scores(ax, scored):
     ax.set_ylim(30, 95)
     ax.set_ylabel("Average combine score of drafted backs\n(percentile; axis starts at 30)", color=TEXT_2)
     # Two lines: the full title is wider than this narrower panel
-    ax.set_title("Drafted undersized backs scored higher\nin every round", loc="left", color=TEXT, fontsize=11.5, fontweight="bold")
+    ax.set_title("Drafted undersized backs tested a bit higher\nin each round group", loc="left", color=TEXT, fontsize=11.5, fontweight="bold")
 
 
 def plot_figure(scored, weights):
@@ -192,11 +192,11 @@ def plot_figure(scored, weights):
     plot_drafted_scores(right, scored)
 
     pct = {d: f"{weights[d] * 100:.0f}%" for d in DRILLS}
-    fig.text(0.07, 0.955, "Elite athleticism earns undersized backs less draft credit", fontsize=15, fontweight="bold", color=TEXT, va="top")
+    fig.text(0.07, 0.955, "Top-testing undersized backs may get less draft credit", fontsize=15, fontweight="bold", color=TEXT, va="top")
     fig.text(
         0.07, 0.895,
-        "Among the most athletic backs (top 40% of scores), undersized backs were drafted less often than equally athletic backs; lower down\n"
-        "there is no consistent gap. Drafted undersized backs out-tested other backs taken in the same rounds. "
+        "Among the top 40% of combine scores, undersized backs were drafted less often than equally athletic backs, but the 95% intervals overlap;\n"
+        "lower down there is no consistent gap. Drafted undersized backs tested a bit higher in each round group. "
         f"Weights: 40 {pct['forty']}, broad jump {pct['broad_jump']}, 3-cone {pct['cone']}.",
         fontsize=10.5, color=TEXT_2, va="top",
     )
