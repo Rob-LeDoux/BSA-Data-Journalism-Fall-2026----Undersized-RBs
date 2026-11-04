@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.stats import fisher_exact
 import statsmodels.formula.api as smf
 from statsmodels.stats.proportion import proportion_confint
 import nflreadpy as nfl
@@ -23,7 +24,9 @@ FIT_FIRST_CLASS = 2000
 FIT_LAST_CLASS = 2022  # later classes don't have 4 seasons yet
 DRILLS = ["forty", "broad_jump", "cone"]
 DRILL_NAMES = {"forty": "40", "broad_jump": "broad jump", "cone": "3-cone"}
-QUINTILES = ["Bottom 20%", "20-40%", "40-60%", "60-80%", "Top 20%"]
+# Quintiles merged into three bands so each undersized bar has ~50 backs, not ~25
+SCORE_BANDS = ["Bottom 40%", "Middle 20%", "Top 40%"]
+SCORE_BAND_EDGES = [0, 40, 60, 100]
 ROUND_GROUPS = ["Rounds 1-2", "Rounds 3-4", "Rounds 5-7"]
 
 BG = "#fcfcfb"
@@ -120,7 +123,7 @@ def score_backs(combine, weights):
     scored = combine[can_score].copy()
     scored["raw_score"] = raw[can_score.to_numpy()]
     scored["score"] = scored["raw_score"].rank(pct=True) * 100
-    scored["quintile"] = pd.qcut(scored["score"], 5, labels=QUINTILES)
+    scored["score_band"] = pd.cut(scored["score"], SCORE_BAND_EDGES, labels=SCORE_BANDS)
     scored["round_group"] = pd.cut(scored["draft_round"], [0, 2, 4, 7], labels=ROUND_GROUPS)
     return scored
 
@@ -137,11 +140,11 @@ def style_axis(ax):
 
 
 def plot_share_drafted(ax, scored):
-    x = np.arange(len(QUINTILES))
+    x = np.arange(len(SCORE_BANDS))
     width = 0.38
     rows = []
     for offset, undersized in ((-width / 2, False), (width / 2, True)):
-        group = scored[scored["undersized"] == undersized].groupby("quintile", observed=False)["drafted"]
+        group = scored[scored["undersized"] == undersized].groupby("score_band", observed=False)["drafted"]
         counts, totals = group.sum(), group.size()
         share = counts / totals * 100
         low, high = proportion_confint(counts, totals, method="wilson")
@@ -151,9 +154,9 @@ def plot_share_drafted(ax, scored):
             ax.text(xi, hi + 1.5, f"{s:.0f}%", ha="center", va="bottom", color=TEXT, fontsize=9)
             ax.text(xi, -3, f"n={n}", ha="center", va="center", color=MUTED, fontsize=8)
         rows.append(share.round(0).rename(LABELS[undersized].split(" (")[0]))
-    print("\nDrafted % by quintile:\n", pd.concat(rows, axis=1).to_string())
+    print("\nDrafted % by score band:\n", pd.concat(rows, axis=1).to_string())
 
-    ax.set_xticks(x, QUINTILES)
+    ax.set_xticks(x, SCORE_BANDS)
     ax.set_ylim(-6, 105)
     ax.set_ylabel("Drafted (%)", color=TEXT_2)
     ax.set_xlabel("RB combine score (percentile among RB combine invitees)", color=TEXT_2)
@@ -192,11 +195,15 @@ def plot_figure(scored, weights):
     plot_drafted_scores(right, scored)
 
     pct = {d: f"{weights[d] * 100:.0f}%" for d in DRILLS}
-    fig.text(0.07, 0.955, "Top-testing undersized backs may get less draft credit", fontsize=15, fontweight="bold", color=TEXT, va="top")
+    top = scored[scored["score_band"] == SCORE_BANDS[-1]]
+    top_share = top.groupby("undersized")["drafted"].mean() * 100
+    top_p = fisher_exact(pd.crosstab(top["undersized"], top["drafted"]))[1]
+    fig.text(0.07, 0.955, "Top-testing undersized backs were drafted less often", fontsize=15, fontweight="bold", color=TEXT, va="top")
     fig.text(
         0.07, 0.895,
-        "Among the top 40% of combine scores, undersized backs were drafted less often than equally athletic backs, but the 95% intervals overlap;\n"
-        "lower down there is no consistent gap. Drafted undersized backs tested a bit higher in each round group. "
+        f"Among the top 40% of combine scores, {top_share[True]:.0f}% of undersized backs were drafted vs. {top_share[False]:.0f}% of equally athletic backs "
+        f"(Fisher's exact p = {top_p:.2f});\n"
+        "lower down there is no clear gap. Drafted undersized backs tested a bit higher in each round group. "
         f"Weights: 40 {pct['forty']}, broad jump {pct['broad_jump']}, 3-cone {pct['cone']}.",
         fontsize=10.5, color=TEXT_2, va="top",
     )
@@ -215,6 +222,11 @@ def main_chart():
     weights = fit_drill_weights(combine)
     scored = score_backs(combine, weights)
     print(f"\nScored {len(scored)} backs ({int(scored['undersized'].sum())} undersized)")
+    for band in SCORE_BANDS:
+        # Fisher's exact test: is the drafted share different for undersized backs in this band?
+        in_band = scored[scored["score_band"] == band]
+        table = pd.crosstab(in_band["undersized"], in_band["drafted"])
+        print(f"{band}: Fisher exact p = {fisher_exact(table)[1]:.3f}")
     fig = plot_figure(scored, weights)
     FIGURES_DIR.mkdir(exist_ok=True)
     path = FIGURES_DIR / "fig6_combine_score_vs_draft.png"
