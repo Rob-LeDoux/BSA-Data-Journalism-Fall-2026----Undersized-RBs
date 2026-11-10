@@ -27,6 +27,14 @@ ROSTER_COLS = ["season", "gsis_id", "full_name", "height", "weight", "birth_date
 # Combine drills: 40-yard dash (seconds), 3-cone drill (seconds), broad jump (inches)
 COMBINE_COLS = ["forty", "cone", "broad_jump"]
 
+# Veteran contract: signed 3+ years after entering the league, when rookie deals
+# end or extensions are allowed. Earlier deals are rookie or minimum depth deals.
+VETERAN_CONTRACT_MIN_YEARS = 3
+# earned_veteran_contract is only judged for these entry years: Over The Cap
+# coverage is thin before 2010, and later entrants haven't had a fair chance yet
+VETERAN_CONTRACT_FIRST_ENTRY = 2010
+VETERAN_CONTRACT_LAST_ENTRY = 2022
+
 
 def load_combine_drills():
     combine = nfl.load_combine().filter(pl.col("pfr_id").is_not_null())
@@ -35,6 +43,29 @@ def load_combine_drills():
     is_shared = pl.col("pfr_id").is_duplicated()
     combine = combine.filter(~is_shared | pl.col("pos").is_in(["RB", "FB"]))
     return combine.filter(~pl.col("pfr_id").is_duplicated()).select(["pfr_id", *COMBINE_COLS])
+
+
+def load_veteran_contracts(rbs):
+    # Entry year per player; a few are missing, so fall back to his first roster season
+    entry = rbs.group_by("gsis_id").agg(
+        entry=pl.coalesce(pl.col("entry_year").min(), pl.col("season").min())
+    )
+    # year_signed = 0 is a placeholder in the contract data
+    contracts = nfl.load_contracts().filter(pl.col("gsis_id").is_not_null() & (pl.col("year_signed") > 0))
+    best = (
+        contracts.join(entry, on="gsis_id", how="inner")
+        .filter(pl.col("year_signed") >= pl.col("entry") + VETERAN_CONTRACT_MIN_YEARS)
+        .group_by("gsis_id")
+        # Share of the salary cap, so deals from different years compare fairly
+        .agg(best_veteran_apy_pct_cap=(pl.col("apy_cap_pct").max() * 100).round(2))
+    )
+    in_window = pl.col("entry").is_between(VETERAN_CONTRACT_FIRST_ENTRY, VETERAN_CONTRACT_LAST_ENTRY)
+    return entry.join(best, on="gsis_id", how="left").select(
+        "gsis_id",
+        "best_veteran_apy_pct_cap",
+        # Null outside the entry-year window, where "no contract" can't be judged
+        earned_veteran_contract=pl.when(in_window).then(pl.col("best_veteran_apy_pct_cap").is_not_null()),
+    )
 
 
 def load_rb_roster(seasons):
@@ -69,6 +100,7 @@ def load_rb_roster(seasons):
         .with_columns(pfr_id=pl.coalesce("pfr_id", "players_pfr_id"))
         .drop("players_pfr_id")
         .join(load_combine_drills(), on="pfr_id", how="left")
+        .join(load_veteran_contracts(rbs), on="gsis_id", how="left")
     )
 
 
